@@ -38,6 +38,8 @@ USAGE
     You must list the Groups that EZproxy will accept authentication for,
     and the MD5 password must match the one given in the configuration
     (below).
+    
+    Requires the PDS.pm module : see https://github.com/spotrick/PDS.pm
 
 CONFIGURATION
     Configuration requires two values:
