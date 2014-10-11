@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+ezpticket
+
+=head1 DESCRIPTION
+
+ezpticket is a cgi authentication script used to authenticate access
+to EZproxy, using the CGI Script Authentication method. This is
+described in detail at
+http://oclc.org/support/services/ezproxy/documentation/usr/cgi.en.html
+
+Briefly, EZproxy will call this script to authenticate the user. The script will 
+check with PDS to see if the user has already authenticated. If not, PDS will present
+a form for the user to input username and password.
+PDS will return a pds_handle, which this script uses to call PDS back to retrieve 
+user details. The user details are then used to determine a Group or Groups for 
+EZproxy to permit access to particular resources.
+
+Once authenticated, the user details are retrieved from Alma, and the 
+statistical category used to determine a Group or Groups for EZproxy.
+A mapping from statistical category to Group is included in the separate 
+configuration file.
+
+=head1 USAGE
+
+This script needs to be installed as a cgi script on a web server.
+
+To link EZproxy to this script, you need to make an entry in ezproxy.usr
+that looks like:
+
+    ::CGI=https://library.youruni.edu.au/cgi-bin/ezpticket?url=^R
+
+    ::Ticket
+    AcceptGroups STAFF+STUDENT
+    TimeValid 10
+    MD5 ********
+    Expired; Deny reject.html
+    /Ticket
+
+You must list the Groups that EZproxy will accept authentication for, and the MD5 
+password must match the one given in the configuration (below).
+
+=cut
+
+use strict;
+use warnings;
+
+use CGI;
+use Digest::MD5 'md5_hex';
+
+use PDS;
+
+use constant DEBUG => 0;
+
+=head1 CONFIGURATION
+
+Configuration requires two values:
+
+ezhost : the host URL of our service
+
+secret : the code used to generate the MD5 portion of the ticket (should match
+the code defined in EZproxy user.txt)
+
+=cut
+
+my $config = {
+
+	"ezhost"  => "https://proxy.library.adelaide.edu.au",
+
+	"secret"  => "********"
+    };
+
+my $q = new CGI;
+my $url = $q->param('url');
+
+## use PDS to authenticate and return userid
+
+my $pds_handle = $q->param('pds_handle');
+
+unless ( $pds_handle )
+{
+        ## No handle, so we haven't logged in yet.
+        PDS->login;
+}
+
+my $pds = PDS->new( $pds_handle );
+
+if ( my $userid = $pds->userid ) { # i.e. we have an id, therefore login was good
+
+	my $group = $pds->group;
+	my $ticket = ticket( $userid, $group );
+	my $link = sprintf "%s/login?user=%s&ticket=%s&qurl=%s",
+	    $config->{ezhost}, CGI::escape($userid), CGI::escape($ticket), $url;
+	
+	if (DEBUG) {
+	    print
+		"Content-type: text/html\n\n",
+		"<p>User $userid is authorised for group $group\n",
+		"<p>Ticket: ", ticket( $userid, $group ), "\n",
+		"<p>URL: <a href=\"", $link, "\">", $link, "</a>";
+	    exit;
+	}
+
+	print "Location: $link\n\n";
+}
+else
+{
+	print "Content-type: text/plain\n\n";
+	print "Error: ", $pds->error;
+}
+
+exit;
+
+sub ticket
+{
+	## Generate the ticket needed by EZproxy
+	my ($userid, $groups) = @_;
+	my ($packet, $ticket);
+
+	$packet = '$u' . time();
+	$packet .= '$g' . $groups if $groups;
+	$packet .= '$e';
+
+	$ticket = md5_hex($config->{secret}, $userid, $packet) . $packet;
+
+	return $ticket;
+}
+
+__END__
+
+=head1 AUTHOR
+
+Steve Thomas <stephen.thomas@adelaide.edu.au>
+
+=head1 VERSION
+
+This is version 2014.09.25
+
+=head1 LICENCE
+
+Copyright 2014  Steve Thomas
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+=cut
